@@ -37,7 +37,29 @@ Two takeaways:
 - **With real parallelism, the original hypothesis holds.** 16 tiles beat 4 because they fill all 8 cores and
   even out uneven tiles. It was the GIL, not the idea, that sank the 2023 experiment.
 
-Full write-up with live demo: [`notebooks/parallel_sift.ipynb`](notebooks/parallel_sift.ipynb).
+- **Full write-up with live demo:** [`notebooks/parallel_sift.ipynb`](notebooks/parallel_sift.ipynb)
+- **Presentation:** [slides (PDF)](slides/parallel_sift_presentation.pdf), or the editable
+  [PowerPoint](slides/parallel_sift_presentation.pptx) with speaker notes
+
+## Processing time: how long keypoint extraction took
+
+Wall-clock time to extract NMS-SIFT keypoints and descriptors, per image and for all 50 images:
+
+| Version | Mean per image | Fastest / slowest image | All 50 images |
+|---|---|---|---|
+| Serial, whole image | 71.5 s | 42.3 s / 118.1 s | 59.6 min |
+| Serial, 4 tiles | 67.9 s | 39.6 s / 107.2 s | 56.6 min |
+| Serial, 16 tiles | 62.5 s | 36.1 s / 98.3 s | 52.1 min |
+| Threads (GIL), 4 tiles | 68.5 s | 40.2 s / 107.9 s | 57.1 min |
+| Threads (GIL), 16 tiles | 63.3 s | 36.7 s / 100.8 s | 52.7 min |
+| **Processes, 4 tiles** | **20.9 s** | 13.1 s / 34.6 s | **17.5 min** |
+| **Processes, 16 tiles** | **10.6 s** | 7.5 s / 16.2 s | **8.8 min** |
+| *No-GIL Python 3.14t:* serial, whole image | 79.5 s | 47.8 s / 127.9 s | 66.2 min |
+| *No-GIL Python 3.14t:* threads, 4 tiles | 24.1 s | 15.0 s / 39.2 s | 20.1 min |
+| *No-GIL Python 3.14t:* threads, 16 tiles | 13.5 s | 9.2 s / 22.0 s | 11.3 min |
+
+The regular-Python rows ran on Python 3.14 with the GIL. Images vary in size and texture, which is why the times
+vary so much from image to image. Raw per-image times are in [`results/timings.csv`](results/timings.csv).
 
 ## Diagnosis in one chart
 
