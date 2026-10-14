@@ -10,8 +10,10 @@ rebuilt and re-run end to end.
 **Hypothesis (2023):** splitting each image into 16 tiles, one thread per tile, would extract SIFT features
 faster than 4 tiles.
 
-**Result (2023):** a null result. 16 tiles were faster on 24 of 36 images, by about 1.4% on average. Neither
-setup was meaningfully faster than plain serial code.
+**Result (2023):** a null result. There was no significant improvement: 16 tiles were faster on only 24 of 36
+images, by about 1.4% on average, and neither setup was meaningfully faster than plain serial code. Worse,
+splitting the image cost accuracy: 16 tiles found 5% fewer keypoints than 4 tiles, because keypoints near
+tile borders are lost.
 
 **Diagnosis:** the SIFT implementation is pure Python, and CPython's **Global Interpreter Lock** lets only one
 thread run Python bytecode at a time. The threads were taking turns on one core. Measured directly, threaded
@@ -48,6 +50,26 @@ Threads with the GIL sit at 1.0 core, the same as serial. Processes and no-GIL t
 Values above 8 come from SMT (two hardware threads per core).
 
 ![Per-image wall time](results/time_per_image.png)
+
+## The hidden cost: keypoints lost at tile borders
+
+Splitting an image is not free. Each tile is processed as if it were a whole image, so:
+- **No border keypoints.** SIFT skips a 5-pixel border on every tile, so a strip along every cut gets no
+  keypoints.
+- **Clipped windows.** Keypoints near a cut have their orientation and descriptor windows clipped.
+- **Blind suppression.** Non-maximum suppression can't see across a cut.
+
+The more cuts, the more is lost. A 4×4 grid has three times as many internal cut lines as a 2×2 grid.
+
+| Tiling | Keypoints found (mean of 50 images) | Lost vs whole image | Worst image |
+|---|---|---|---|
+| Whole image | 1,290 | n/a | n/a |
+| 4 tiles | 1,251 | −3.1% (about 38 keypoints) | −6.1% |
+| 16 tiles | 1,191 | −7.9% (about 98 keypoints) | −12.1% |
+
+This matches the 2023 finding that "the more quadrants you have, the less keypoints are generated." It also
+inflates the speedups slightly: fewer keypoints means less descriptor work, which is the 1.14× that serial
+16-tile code gets without any parallelism. For retrieval, lost keypoints mean fewer chances to match a query.
 
 ## Is this the same experiment as 2023?
 
@@ -124,15 +146,48 @@ python3.14t -m venv .venv-ft && .venv-ft/Scripts/pip install numpy
 .venv-ft/Scripts/python bench/run_benchmark.py --configs serial_whole,threads4,threads16   # ~1.5 h
 ```
 
-## Limitations and what I'd do next
+## Future work
 
-- **Make each core faster before adding cores.** OpenCV's C++ SIFT runs the same image in 88 ms, about
-  600× faster than this pure-Python version. Parallelism multiplies single-core speed, so a production CBIR
-  system would use compiled SIFT and parallelise across *images*, which also removes the border-keypoint
-  loss (−3% at 4 tiles, −8% at 16).
-- **Border loss can be fixed.** If tiling is required, overlapping tiles (a "halo") restore the lost keypoints.
+**1. Go further around the GIL.** Processes and free-threaded Python already work, as shown above. Next steps:
+- **Release the GIL inside the hot loops.** Compile them with Numba (`@njit(nogil=True)`) or Cython
+  (`with nogil:`), so ordinary threads run in parallel even on standard Python, without pickling or process
+  start-up.
+- **Vectorise.** The per-pixel extremum search and the descriptor histograms map naturally onto NumPy array
+  operations. That makes each core much faster before any parallelism is added.
+- **Scale out.** Once one image runs well, spread a whole image database across machines (Ray, Dask, or a job
+  queue), which is the horizontal-scaling idea from the original slides.
+
+**2. Move SIFT to a GPU.** SIFT is highly data-parallel:
+- **Pyramid stage:** Gaussian blurs, Differences of Gaussians and the 26-neighbour extremum test are
+  independent for each pixel.
+- **Descriptor stage:** orientations and descriptors are independent for each keypoint.
+
+That is the kind of work GPUs are built for. Options range from existing GPU SIFT implementations (for
+example CudaSift or PopSift) to rewriting the pipeline in CuPy or PyTorch. The catch is transfer overhead: on
+small images like these, copying data to and from the GPU can cost more than it saves, so a GPU pays off when
+many images are processed in batches.
+
+**3. Stop losing keypoints at tile borders.**
+- **Overlapping tiles (a "halo").** Pad each tile with a margin at least as wide as the largest descriptor
+  window, run SIFT on the padded tile, and keep only keypoints whose centre falls inside the tile's own area.
+  Then run non-maximum suppression once more across the seams to remove duplicates. This costs a little
+  duplicated work at the edges, and should bring the counts back to whole-image levels.
+- **Split the work differently.** Detect keypoints on the whole image, and parallelise only the per-keypoint
+  stages (orientation and descriptor), which are independent and lose nothing.
+- **Parallelise across images instead of within them.** For a CBIR database, one process per image has no
+  borders at all.
+
+**4. Measure retrieval quality, not just speed.** Rerun the FLANN + RANSAC matching stage from 2023 to see
+how much the lost keypoints actually hurt retrieval accuracy.
+
+**Perspective.** OpenCV's C++ SIFT processes the same image in 88 ms, about 600× faster than this pure-Python
+version. Parallelism multiplies single-core speed, so items 1 and 2 matter more than adding cores.
+
+## Limitations
+
 - **One run per configuration per image,** on a desktop that wasn't fully isolated. Per-image speedup ranges
   are in `summary.csv`.
+- **No retrieval accuracy.** Only feature-extraction time was measured.
 
 ## Repo layout
 
