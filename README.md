@@ -195,7 +195,7 @@ version. Parallelism multiplies single-core speed, so items 1 and 2 matter more 
 nms_sift/      sift.py (NMS-SIFT), tiling.py, parallel.py (tile runner), cv_compat.py (OpenCV / NumPy shim)
 bench/         get_data.py, run_benchmark.py, make_charts.py
 notebooks/     parallel_sift.ipynb: the full write-up, executed
-slides/        parallel_sift_presentation.pptx: the updated presentation, with speaker notes
+slides/        parallel_sift_presentation.pptx (with speaker notes) and a PDF export for viewing on GitHub
 results/       raw timings, summary, charts, 2023 reference numbers
 archive/       2023 checkpoint notebook (outputs stripped) and slides
 ```
