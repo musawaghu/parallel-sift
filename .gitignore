@@ -1,0 +1,9 @@
+.venv/
+.venv-ft/
+.idea/
+__pycache__/
+.ipynb_checkpoints/
+data/
+desktop.ini
+# full 43 MB original checkpoint (embedded plots); a stripped copy is committed
+archive/NMS-SIFT-Multithreading-checkpoint.ipynb
